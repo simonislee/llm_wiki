@@ -4,10 +4,10 @@ version = "0.6.11"
 description = "LLM Wiki - A personal knowledge base for LLM concepts"
 authors = []
 edition = "2021"
-# AnyDoc and its archive/spreadsheet dependencies require Rust 1.88. Declaring
+# LanceDB and its transitive dependencies require Rust 1.91. Declaring
 # the floor here gives contributors an immediate toolchain error instead of a
 # late, platform-dependent dependency compilation failure.
-rust-version = "1.88"
+rust-version = "1.91"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
