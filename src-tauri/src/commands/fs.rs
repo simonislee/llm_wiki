@@ -1348,11 +1348,11 @@ pub async fn write_file_atomic_checked(
             let tmp_path = temp_file.path().to_path_buf();
             file_sync::mark_app_write_path(&tmp_path);
             file_sync::mark_app_write_path(&target);
-            crate::commands::file_history::record_file_version(
+            crate::commands::file_history::record_file_version_required(
                 &target,
                 "baseline",
                 "before.ui.write_file_atomic_checked",
-            );
+            )?;
             temp_file.write_all(contents.as_bytes()).map_err(|error| {
                 let _ = fs::remove_file(&tmp_path);
                 format!(
@@ -1936,11 +1936,11 @@ pub async fn rename_file_checked(
             verify_file_revision(&source_path, &expected_md5)?;
             file_sync::mark_app_write_path(&source_path);
             file_sync::mark_app_write_path(&destination_path);
-            crate::commands::file_history::record_file_version(
+            crate::commands::file_history::record_file_version_required(
                 &source_path,
                 "baseline",
                 "before.ui.rename_file_checked",
-            );
+            )?;
             let (revalidated_root, revalidated_source) =
                 checked_existing_project_file("rename_file_checked", &project_path, &source)?;
             let revalidated_destination = checked_project_destination(
@@ -1980,11 +1980,11 @@ pub async fn delete_file_checked(
                 checked_existing_project_file("delete_file_checked", &project_path, &path)?;
             verify_file_revision(&target, &expected_md5)?;
             file_sync::mark_app_write_path(&target);
-            crate::commands::file_history::record_file_version(
+            crate::commands::file_history::record_file_version_required(
                 &target,
                 "baseline",
                 "before.ui.delete_file_checked",
-            );
+            )?;
             let (_, revalidated) =
                 checked_existing_project_file("delete_file_checked", &project_path, &path)?;
             if revalidated != target {
@@ -2748,6 +2748,23 @@ mod tests {
         .unwrap_err();
         assert!(outside_error.contains("outside the project"));
         assert_eq!(fs::read_to_string(&outside).unwrap(), "outside");
+
+        let current = read_text_file_versioned(path.to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        let history_dir = root.join(".llm-wiki/history");
+        fs::remove_dir_all(&history_dir).unwrap();
+        fs::write(&history_dir, "history storage unavailable").unwrap();
+        let history_error = write_file_atomic_checked(
+            root.to_string_lossy().into_owned(),
+            path.to_string_lossy().into_owned(),
+            current.md5,
+            "must not be written without a recoverable baseline".to_string(),
+        )
+        .await
+        .unwrap_err();
+        assert!(history_error.contains("History"), "{history_error}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "external Obsidian edit");
 
         fs::remove_dir_all(root).unwrap();
         fs::remove_file(outside).unwrap();

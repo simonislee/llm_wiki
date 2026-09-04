@@ -142,7 +142,12 @@ fn checked_history_dir(root: &Path, create: bool) -> Result<PathBuf, String> {
 
     let dir = metadata_dir.join("history");
     if create {
-        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&dir).map_err(|e| {
+            format!(
+                "Failed to create History directory '{}': {e}",
+                dir.display()
+            )
+        })?;
     } else if !dir.exists() {
         return Ok(dir);
     }
@@ -226,51 +231,56 @@ fn prune_entries_per_file(root: &Path, max_versions: usize) -> Result<(), String
         if entries.len() > max_versions {
             entries.drain(..entries.len() - max_versions);
             let serialized = serde_json::to_string(&entries).map_err(|e| e.to_string())?;
-            fs::write(&path, serialized).map_err(|e| e.to_string())?;
+            write_history_file_atomically(&path, serialized.as_bytes())?;
         }
     }
     Ok(())
 }
 
 pub fn record_file_version(path: &Path, author: &str, tool: &str) {
+    let _ = record_file_version_required(path, author, tool);
+}
+
+/// Record a recoverable text baseline and report storage failures to callers
+/// that are about to perform a destructive checked mutation.
+pub fn record_file_version_required(path: &Path, author: &str, tool: &str) -> Result<(), String> {
     let Some(root) = project_root_for(path) else {
-        return;
+        return Ok(());
     };
     if path.starts_with(root.join(".llm-wiki")) {
-        return;
+        return Ok(());
     }
-    let Ok(_guard) = HISTORY_LOCK.lock() else {
-        return;
-    };
+    let _guard = HISTORY_LOCK.lock().map_err(|e| e.to_string())?;
     let settings = read_history_settings(&root);
     if !settings.enabled || settings.max_versions_per_file == 0 {
-        return;
+        return Ok(());
     }
-    let Ok(metadata) = fs::metadata(path) else {
-        return;
-    };
+    let metadata = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+    if metadata.file_type().is_symlink() {
+        return Err("History source must be a regular file, not a symlink".to_string());
+    }
     if !metadata.is_file() || metadata.len() as usize > MAX_HISTORY_CONTENT_BYTES {
-        return;
+        return Ok(());
     }
-    let Ok(content) = fs::read_to_string(path) else {
-        return;
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::InvalidData => return Ok(()),
+        Err(error) => return Err(error.to_string()),
     };
-    let Ok(dir) = checked_history_dir(&root, true) else {
-        return;
-    };
-    let Ok(checked_store_path) = checked_history_file(&root, path) else {
-        return;
-    };
-    let Some(file_name) = checked_store_path.file_name().map(ToOwned::to_owned) else {
-        return;
-    };
+    let dir = checked_history_dir(&root, true)?;
+    let checked_store_path = checked_history_file(&root, path)?;
+    let file_name = checked_store_path
+        .file_name()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| "History file path must name a file".to_string())?;
     let store_path = dir.join(file_name);
-    let mut entries: Vec<FileHistoryEntry> = fs::read_to_string(&store_path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default();
+    let mut entries: Vec<FileHistoryEntry> = match fs::read_to_string(&store_path) {
+        Ok(raw) => serde_json::from_str(&raw).map_err(|e| e.to_string())?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(error.to_string()),
+    };
     if entries.last().is_some_and(|entry| entry.content == content) {
-        return;
+        return Ok(());
     }
     entries.push(FileHistoryEntry {
         id: Uuid::new_v4().to_string(),
@@ -283,11 +293,27 @@ pub fn record_file_version(path: &Path, author: &str, tool: &str) {
     if entries.len() > settings.max_versions_per_file {
         entries.drain(..entries.len() - settings.max_versions_per_file);
     }
-    if let Ok(raw) = serde_json::to_string(&entries) {
-        if fs::write(&store_path, raw).is_ok() {
-            prune_history_store(&root, &store_path);
-        }
-    }
+    let raw = serde_json::to_string(&entries).map_err(|e| e.to_string())?;
+    write_history_file_atomically(&store_path, raw.as_bytes())?;
+    prune_history_store(&root, &store_path);
+    Ok(())
+}
+
+fn write_history_file_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "History file path must have a parent".to_string())?;
+    let mut temp_file = tempfile::Builder::new()
+        .prefix(".llm-wiki-history-")
+        .suffix(".tmp")
+        .tempfile_in(parent)
+        .map_err(|e| e.to_string())?;
+    temp_file.write_all(contents).map_err(|e| e.to_string())?;
+    temp_file.as_file().sync_all().map_err(|e| e.to_string())?;
+    temp_file
+        .persist(path)
+        .map(|_| ())
+        .map_err(|e| format!("Failed to atomically store history: {}", e.error))
 }
 
 #[tauri::command]
@@ -324,7 +350,7 @@ pub async fn set_file_history_settings(
                 .is_some();
         let raw = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
         validate_optional_regular_file(&settings_path, "History settings")?;
-        fs::write(settings_path, raw).map_err(|e| e.to_string())?;
+        write_history_file_atomically(&settings_path, raw.as_bytes())?;
         if !had_settings || settings.max_versions_per_file < previous.max_versions_per_file {
             prune_entries_per_file(&root, settings.max_versions_per_file)?;
         }
@@ -526,7 +552,7 @@ pub async fn restore_file_history(
                             entries.drain(..entries.len() - retention);
                         }
                         let updated = serde_json::to_string(&entries).map_err(|e| e.to_string())?;
-                        fs::write(&store_path, updated).map_err(|e| e.to_string())?;
+                        write_history_file_atomically(&store_path, updated.as_bytes())?;
                         prune_history_store(&root, &store_path);
                     }
                     Some(content_md5(&current_bytes))
