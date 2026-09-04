@@ -1719,9 +1719,11 @@ function GraphPreviewPanel({
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const savedByPathRef = useRef(new Map([[preview.path, preview.content]]))
   const revisionByPathRef = useRef(new Map([[preview.path, preview.md5]]))
+  const draftsByPathRef = useRef(new Map<string, string>())
   const pendingSaveRef = useRef<{ path: string; markdown: string } | null>(null)
   const currentPathRef = useRef(preview.path)
   const onContentChangeRef = useRef(onContentChange)
+  const [saveError, setSaveError] = useState<{ path: string; message: string } | null>(null)
   const category = getFileCategory(preview.path)
 
   currentPathRef.current = preview.path
@@ -1730,6 +1732,9 @@ function GraphPreviewPanel({
   useEffect(() => {
     savedByPathRef.current.set(preview.path, preview.content)
     revisionByPathRef.current.set(preview.path, preview.md5)
+    setSaveError(draftsByPathRef.current.has(preview.path)
+      ? { path: preview.path, message: "This unsaved draft was retained after a save conflict." }
+      : null)
   }, [preview.path, preview.md5])
 
   const writeNow = useCallback((path: string, markdown: string) => {
@@ -1749,9 +1754,17 @@ function GraphPreviewPanel({
         )
         revisionByPathRef.current.set(path, nextMd5)
         savedByPathRef.current.set(path, markdown)
+        if (draftsByPathRef.current.get(path) === markdown) {
+          draftsByPathRef.current.delete(path)
+          setSaveError((current) => current?.path === path ? null : current)
+        }
         if (currentPathRef.current === path) onContentChangeRef.current(markdown)
       })
-      .catch((err) => console.error("Failed to save graph preview:", err))
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err)
+        setSaveError({ path, message })
+        console.error("Failed to save graph preview:", err)
+      })
   }, [project])
 
   useEffect(() => {
@@ -1770,10 +1783,10 @@ function GraphPreviewPanel({
     const path = preview.path
     if (markdown === savedByPathRef.current.get(path)) return
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    draftsByPathRef.current.set(path, markdown)
     pendingSaveRef.current = { path, markdown }
     if (options?.immediate) {
       pendingSaveRef.current = null
-      onContentChange(markdown)
       writeNow(path, markdown)
       return
     }
@@ -1781,7 +1794,7 @@ function GraphPreviewPanel({
       pendingSaveRef.current = null
       writeNow(path, markdown)
     }, 1000)
-  }, [onContentChange, preview.path, writeNow])
+  }, [preview.path, writeNow])
 
   return (
     <div className="flex w-[420px] min-w-[320px] max-w-[50vw] shrink-0 flex-col border-l bg-background">
@@ -1797,11 +1810,16 @@ function GraphPreviewPanel({
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
+      {saveError?.path === preview.path && (
+        <div role="alert" className="border-b border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Save blocked to protect an external edit. Your draft is retained in the editor. {saveError.message}
+        </div>
+      )}
       <div className="min-w-0 flex-1 overflow-auto">
         {category === "markdown" ? (
           <WikiEditor
             key={preview.path}
-            content={preview.content}
+            content={draftsByPathRef.current.get(preview.path) ?? preview.content}
             onSave={handleSave}
             filePath={preview.path}
           />

@@ -36,12 +36,12 @@ Interactive Markdown saves use a versioned read and a checked atomic write:
 
 1. The backend reads the UTF-8 bytes and computes the MD5 revision from that same byte snapshot.
 2. A save supplies that loaded revision.
-3. The backend rechecks the current file at the write boundary. If Obsidian, a sync client, or another process changed it, the save fails without modifying either version.
+3. The backend rechecks the current file immediately before the write boundary. If Obsidian, a sync client, or another ordinary cooperating process changed it, the save fails without modifying either version. A hostile process running as the same OS user can still race pathname operations in the final syscall window and is outside the desktop app's security boundary.
 4. On success, the backend writes and syncs a temporary sibling file, then renames it over the destination. Readers therefore see the old complete file or the new complete file, not a partial write.
 
 There is no automatic last-writer-wins behavior and no implicit three-way merge. After a conflict, reload the disk version and manually reapply or merge the pending edit.
 
-File history is enabled by default and retains up to 10 versions per text file unless changed in Settings. Before checked writes, renames, and deletes, the current text version is recorded under `.llm-wiki/history/`; restore also snapshots the current version before replacing it. Deleted text files can be listed and restored by their original path. History is bounded to 512 KiB per text snapshot, 30 configurable versions per file, 128 MiB total, and 2,048 history files. Binary attachment history is outside this bounded text-history store, so users should continue to use normal vault backup/version-control for irreplaceable binaries.
+File history is enabled by default and retains up to 10 versions per text file unless changed in Settings. Before checked writes, renames, and deletes, the current text version is atomically recorded under `.llm-wiki/history/`; an eligible text mutation aborts if that baseline cannot be stored. Restore also snapshots the current version before replacing it. Deleted text files can be listed and restored by their original path. History is bounded to 512 KiB per text snapshot, 30 configurable versions per file, 128 MiB total, and 2,048 history files. Binary attachment history is outside this bounded text-history store, so users should continue to use normal vault backup/version-control for irreplaceable binaries.
 
 ## Features supplied by Obsidian
 
