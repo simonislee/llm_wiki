@@ -407,7 +407,7 @@ Download fork builds from [Releases](https://github.com/simonislee/llm_wiki/rele
 ### Build from Source
 
 ```bash
-# Prerequisites: Node.js 20+, Rust 1.88+, protoc
+# Prerequisites: Node.js 20+, Rust 1.91+, protoc
 #   macOS:  brew install protobuf
 #   Linux:  sudo apt install protobuf-compiler
 #   Windows: choco install protoc
