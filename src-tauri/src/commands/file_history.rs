@@ -111,7 +111,15 @@ fn project_root_for(path: &Path) -> Option<PathBuf> {
 }
 
 fn history_path(root: &Path, path: &Path) -> PathBuf {
-    let relative = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
+    // Windows temp/project paths may arrive in DOS, short-name, or verbatim
+    // (`\\?\`) form. Canonicalize both sides before deriving the key so the
+    // same vault file addresses the same history record across read/write APIs.
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let relative = canonical_path
+        .strip_prefix(&canonical_root)
+        .unwrap_or(&canonical_path)
+        .to_string_lossy();
     // Fixed FNV-1a keeps history addresses stable across Rust/toolchain upgrades.
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in relative.as_bytes() {
@@ -119,7 +127,9 @@ fn history_path(root: &Path, path: &Path) -> PathBuf {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     let key = format!("{hash:016x}");
-    root.join(".llm-wiki/history").join(format!("{key}.json"))
+    canonical_root
+        .join(".llm-wiki/history")
+        .join(format!("{key}.json"))
 }
 
 fn history_dir(root: &Path) -> PathBuf {
