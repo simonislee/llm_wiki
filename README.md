@@ -397,7 +397,7 @@ The original is platform-agnostic (abstract pattern). We handle concrete cross-p
 
 ## Installation
 
-Maintainers and source builders should use the pinned, reproducible workflow in [Build and release](docs/BUILD_AND_RELEASE.md). Fork synchronization and GPL attribution are documented in [Fork and upstream policy](docs/FORK_AND_UPSTREAM.md); macOS installation, upgrade, and rollback are covered in [macOS operations](docs/MACOS_OPERATIONS.md).
+Maintainers and source builders should use the pinned, reproducible workflow in [Build and release](docs/BUILD_AND_RELEASE.md). Run the clean-install, live-provider, Obsidian round-trip, and release checklist in [MVP acceptance](docs/MVP_ACCEPTANCE.md). Fork synchronization and GPL source obligations are documented in [Fork and upstream policy](docs/FORK_AND_UPSTREAM.md); privacy and local safety defaults are in [Security](docs/SECURITY.md); macOS installation, backup/restore, upgrade, and troubleshooting are covered in [macOS operations](docs/MACOS_OPERATIONS.md). Review the visible [known limitations and post-MVP roadmap](docs/ROADMAP.md) before deployment.
 
 ### Pre-built Binaries
 
